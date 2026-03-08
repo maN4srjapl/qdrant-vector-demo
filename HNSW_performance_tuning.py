@@ -69,3 +69,50 @@ collection_info = client.get_collection(collection_name)
 print(f"Vector size: {collection_info.vectors.size}")
 print(f"Distance metric: {collection_info.vectors.distance}")
 print(f"HNSW M: {collection_info.hnsw_config.m}")
+
+# bulk upload with metadata
+# VECTOR INGESTION PIPELINE:
+def upload_batch(start_idx, end_idx):
+    points = [] # a point consists of an id, a vector, and an optional payload (metadata)
+    for i in range(start_idx, min(end_idx, total_points)):
+        example = ds["train"][i]
+
+        embedding = example["text-embedding-3-large-1536-embedding"]
+
+        payload = {
+            "text": example["text"],
+            "title": example["title"],
+            "_id": example["_id"],
+            "length": len(example["text"]),
+            "has_numbers": any(char.isdigit() for char in example["text"]),
+        }
+
+        points.append(models.PointStruct(id=i, vector=embedding, payload=payload))
+
+    if points:
+        client.upload_points(collection_name=collection_name, points=points)
+        return len(points)
+    return 0
+
+
+batch_size = 64 * 10
+total_points = len(ds["train"])
+print(f"Uploading {total_points} points in batches of {batch_size}")
+
+total_uploaded = 0
+for i in tqdm(range(0, total_points, batch_size), desc="Uploading points"):
+    uploaded = upload_batch(i, i + batch_size)
+    total_uploaded += uploaded
+
+print(f"Upload completed! Total points uploaded: {total_uploaded}")
+
+# enabling hnsw indexing
+
+client.update_collection(
+    collection_name=collection_name,
+    hnsw_config=models.HnswConfigDiff(
+        m=16  # Build HNSW now: m=16 after the bulk load.
+    ),
+)
+
+print("HNSW indexing enabled with m=16")
