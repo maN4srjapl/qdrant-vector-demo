@@ -1,12 +1,13 @@
 from datasets import load_dataset
 from qdrant_client import QdrantClient, models
 from tqdm import tqdm
-import openai
 import time
+from dotenv import load_dotenv
 import os
 
-client = QdrantClient(url=os.getenv("QDRANT_URL"), api_key=os.getenv("QDRANT_API_KEY"))
+load_dotenv()  # Load variables from .env file
 
+client = QdrantClient(url=os.getenv("QDRANT_URL"), api_key=os.getenv("QDRANT_API_KEY"))
 
 try:
     collections = client.get_collections()
@@ -116,3 +117,26 @@ client.update_collection(
 )
 
 print("HNSW indexing enabled with m=16")
+
+
+query = "impact of inflation on markets"
+
+response = client_openai.embeddings.create(
+    model = "text-embedding-3-large-1536",
+    input = query
+)
+
+query_vector = response.data[0].embedding
+
+
+results = client.query.search(
+    collection_name=collection_name,
+    query_vector=query_vector,
+    limit=5
+)
+
+for hit in results.result:
+    print(f"\nTitle: {hit.payload['title']}")
+    print("Score:", hit.score)
+    print("Text preview:", hit.payload['text'])
+    print()
