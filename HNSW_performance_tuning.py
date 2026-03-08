@@ -50,10 +50,10 @@ client.create_collection(
         size=1536,
         distance=models.Distance.COSINE,
     ),
-    hnsw_config=models.HnswConfig( 
+    hnsw_config=models.HnswConfigDiff( 
         # this is bulk loading optimization, which will be used when we upload points in batches
         m=0,  
-        ef_construction=200,  #index construction quality
+        ef_construct=200,  #index construction quality
         full_scan_threshold=1000 # if collection has less than 1000 points, it will use brute-force search instead of HNSW index
     ),
     optimizers_config=models.OptimizersConfigDiff(
@@ -66,9 +66,9 @@ client.create_collection(
 
 print(f"Collection '{collection_name}' created successfully!")
 collection_info = client.get_collection(collection_name)
-print(f"Vector size: {collection_info.vectors.size}")
-print(f"Distance metric: {collection_info.vectors.distance}")
-print(f"HNSW M: {collection_info.hnsw_config.m}")
+print(f"Vector size: {collection_info.config.params.vectors.size}")
+print(f"Distance metric: {collection_info.config.params.vectors.distance}")
+print(f"HNSW M: {collection_info.config.hnsw_config.m}")
 
 # bulk upload with metadata
 # VECTOR INGESTION PIPELINE:
@@ -111,7 +111,7 @@ print(f"Upload completed! Total points uploaded: {total_uploaded}")
 client.update_collection(
     collection_name=collection_name,
     hnsw_config=models.HnswConfigDiff(
-        m=16  # Build HNSW now: m=16 after the bulk load.
+        m=16  
     ),
 )
 
