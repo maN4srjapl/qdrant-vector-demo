@@ -118,25 +118,22 @@ client.update_collection(
 
 print("HNSW indexing enabled with m=16")
 
+# Perform a search using a query from the dataset
+print("\n--- Performing Search ---")
+query_example = ds["train"][0]  # Use first example as query
+query_embedding = query_example["text-embedding-3-large-1536-embedding"]
+query_text = query_example["text"][:100]
 
-query = "impact of inflation on markets"
+print(f"Query: {query_text}...")
 
-response = client_openai.embeddings.create(
-    model = "text-embedding-3-large-1536",
-    input = query
-)
-
-query_vector = response.data[0].embedding
-
-
-results = client.query.search(
+results = client.search(
     collection_name=collection_name,
-    query_vector=query_vector,
+    query_vector=query_embedding,
     limit=5
 )
 
-for hit in results.result:
-    print(f"\nTitle: {hit.payload['title']}")
-    print("Score:", hit.score)
-    print("Text preview:", hit.payload['text'])
-    print()
+print("\nTop 5 Search Results:")
+for i, hit in enumerate(results, 1):
+    print(f"\n{i}. Title: {hit.payload['title']}")
+    print(f"   Score: {hit.score:.4f}")
+    print(f"   Text preview: {hit.payload['text'][:150]}...")
