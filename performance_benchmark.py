@@ -49,3 +49,18 @@ for config in configs:
     test_queries = [
         encoder.encode(f"Find documents similar to Document {i}").tolist() for i in range(10)
     ]
+
+    # Benchmark search performance
+    print(f"Benchmarking search performance for {collection_name}...")
+    start_time = time.time()
+    for query in test_queries:
+        client.search(
+            collection_name=collection_name,
+            query_vector=query,
+            limit=5,
+            params=models.SearchParams(hnsw_ef=config["hnsw_ef"]),
+        )
+    end_time = time.time()
+    avg_time_per_query = (end_time - start_time) / len(test_queries)
+    print(f"{config['description']}: Average time per query: {avg_time_per_query} seconds")
+                                                              
