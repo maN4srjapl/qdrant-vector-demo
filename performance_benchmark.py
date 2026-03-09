@@ -54,11 +54,11 @@ for config in configs:
     print(f"Benchmarking search performance for {collection_name}...")
     start_time = time.time()
     for query in test_queries:
-        client.search(
+        client.query_points(
             collection_name=collection_name,
-            query_vector=query,
+            query=query,
             limit=5,
-            params=models.SearchParams(hnsw_ef=config["hnsw_ef"]),
+            search_params=models.SearchParams(hnsw_ef=config["hnsw_ef"])
         )
     end_time = time.time()
     avg_time_per_query = (end_time - start_time) / len(test_queries)
