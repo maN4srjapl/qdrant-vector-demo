@@ -101,3 +101,39 @@ for query in queries:
     for result in sparse_results:
         print("\t-", result.payload["text"], result.score)
     print()
+
+
+def rrf_search(query: str) -> list[models.ScoredPoint]:
+    response = client.query_points(
+        collection_name=collection_name,
+        prefetch=[
+            models.Prefetch(
+                query=models.Document(
+                    text=query,
+                    model="Qdrant/bm25",
+                ),
+                using="sparse",
+                limit=3,
+            ),
+            models.Prefetch(
+                query=models.Document(
+                    text=query,
+                    model="sentence-transformers/all-MiniLM-L6-v2",
+                ),
+                using="dense",
+                limit=3,
+            )
+        ],
+        query=models.FusionQuery(fusion=models.Fusion.RRF),
+        limit=3,
+    )
+    return response.points
+
+for query in queries:
+    print(f"RRF Search for: {query}")
+    rrf_results = rrf_search(query)
+    for result in rrf_results:
+        print("\t-", result.payload["text"], result.score)
+    print()
+
+    
