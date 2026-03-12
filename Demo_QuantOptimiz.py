@@ -15,6 +15,52 @@ import os
 
 client = QdrantClient(url=os.getenv("QDRANT_URL"))
 
+VECTOR_SIZE = 384  # Adjust to your embedding size
+NUM_POINTS = 10000  # Number of points to upsert for testing
+
+
+# generating the sample dataset
+
+def generate_dataset(n_points=NUM_POINTS, dim=VECTOR_SIZE):
+    vectors = np.random.rand(n_points, dim).astype(np.float32)
+
+    points = []
+    for i, vec in enumerate(vectors):
+        points.append(
+            models.PointStruct(
+                id=i,
+                vector=vec.tolist(),
+                payload={"category": "demo"}
+            )
+        )
+    return points
+
+dataset = generate_dataset()
+
+# uploading the dataset
+
+def upload_data(collection_name, dataset, batch_size=500):
+    for i in range(0, len(dataset), batch_size):
+        client.upsert(
+            collection_name=collection_name,
+            points=dataset[i:i+batch_size]
+        )
+    print(f"Uploaded data to {collection_name}")
+
+
+# create the baseline collection
+client.recreate_collection(
+    collection_name="store",
+    vectors_config=models.VectorParams(
+        size=VECTOR_SIZE,
+        distance=models.Distance.COSINE
+    )
+)
+
+upload_data("store", dataset)
+
+
+
 def measure_search_performance(collection_name, test_queries, label ="Baseline"):
     latencies = []
     for query in test_queries:
@@ -76,7 +122,7 @@ quantization_configs = {
         "expected_compression": "16x"
     }
 }
-'''
+
 # Create quantized collections
 for method_name, config_info in quantization_configs.items():
     collection_name = f"quantized_{method_name}"
@@ -93,7 +139,7 @@ for method_name, config_info in quantization_configs.items():
     
     print(f"Created {method_name} quantized collection: {collection_name}")
 
-'''
+
 # Upload the same data to each quantized collection (omitted for brevity, but you would repeat the upsert process for each collection)
 
 def benchmark(collection_name, your_test_queries, method_name):
@@ -117,7 +163,7 @@ def benchmark(collection_name, your_test_queries, method_name):
             search_params=models.SearchParams(
                 quantization=models.QuantizationSearchParams(
                     rescore=True,
-                    oversampling=oversampling_factor,
+                    oversampling=oversampling_factor, # Adjust this factor based on your tuning results
                 )
             ),
         )
