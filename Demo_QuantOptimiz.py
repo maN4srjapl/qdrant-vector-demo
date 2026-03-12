@@ -60,7 +60,6 @@ client.recreate_collection(
 upload_data("store", dataset)
 
 
-
 def measure_search_performance(collection_name, test_queries, label ="Baseline"):
     latencies = []
     for query in test_queries:
@@ -81,11 +80,13 @@ def measure_search_performance(collection_name, test_queries, label ="Baseline")
         return {"average_latency": avg_latency, "p95_latency": p95_latency}
     
 
-baseline_metrics = measure_search_performance("store", [[0.12] * 384] * 100, label="Baseline")
+test_queries = np.random.rand(100, VECTOR_SIZE).tolist()
 
-# Define test queries for benchmarking quantized collections
-your_test_queries = [[0.12] * 384] * 100
-
+baseline_metrics = measure_search_performance(
+    "store",
+    test_queries,
+    "Baseline"
+)
 # Now testing with quantization methods
 
 # Define quantization configurations
@@ -130,186 +131,187 @@ for method_name, config_info in quantization_configs.items():
     client.create_collection(
         collection_name=collection_name,
         vectors_config=models.VectorParams(
-            size=1536,  # Adjust to your embedding size
+            size=VECTOR_SIZE,  # Adjust to your embedding size
             distance=models.Distance.COSINE,
             on_disk=True,  # Store originals on disk
         ),
         quantization_config=config_info["config"]
     )
     
+    upload_data(collection_name, dataset)
     print(f"Created {method_name} quantized collection: {collection_name}")
 
 
 # Upload the same data to each quantized collection (omitted for brevity, but you would repeat the upsert process for each collection)
 
-def benchmark(collection_name, your_test_queries, method_name):
+def benchmark(collection_name, queries, method_name):
     """Measure quantized search performance"""
     
     # Test without oversampling/rescoring first
     no_rescoring_metrics = measure_search_performance(
         collection_name, 
-        your_test_queries, 
+        queries, 
         f"{method_name} (No Rescoring)"
     )
-    
-    # Test with oversampling and rescoring
-    def search_with_rescoring(collection_name, query, oversampling_factor=3.0):
-        start_time = time.time()
-        
-        response = client.query_points(
+
+    latencies = []
+
+    for q in queries:
+
+        start = time.time()
+
+        client.query_points(
             collection_name=collection_name,
-            query=query,
+            query=q,
             limit=10,
             search_params=models.SearchParams(
                 quantization=models.QuantizationSearchParams(
                     rescore=True,
-                    oversampling=oversampling_factor, # Adjust this factor based on your tuning results
+                    oversampling=3
                 )
-            ),
+            )
         )
-        
-        return (time.time() - start_time) * 1000, response
-    
-    # Measure with rescoring
-    rescoring_latencies = []
-    for query in your_test_queries:
-        latency, response = search_with_rescoring(collection_name, query)
-        rescoring_latencies.append(latency)
-    
-    avg_rescoring = np.mean(rescoring_latencies)
-    p95_rescoring = np.percentile(rescoring_latencies, 95)
-    
-    print(f"{method_name} (With Rescoring):")
-    print(f"  Average latency: {avg_rescoring:.2f}ms")
-    print(f"  P95 latency: {p95_rescoring:.2f}ms")
-    
+
+        latencies.append((time.time() - start) * 1000)
+
+    avg = np.mean(latencies)
+    p95 = np.percentile(latencies, 95)
+
+    print(f"{method_name} (Rescore) -> Avg: {avg:.2f}ms | P95: {p95:.2f}ms")
+
     return {
         "no_rescoring": no_rescoring_metrics,
-        "with_rescoring": {"avg": avg_rescoring, "p95": p95_rescoring}
+        "with_rescoring": {"avg": avg, "p95": p95}
     }
 
 
-quantization_results = {}
-for method_name in quantization_configs.keys():
-    collection_name = f"quantized_{method_name}"
-    quantization_results[method_name] = benchmark(
-        collection_name, your_test_queries, method_name
-    )
 
-def measure_accuracy_retention(original_collection, quantized_collection, test_queries, factors=[2, 3, 5, 8, 10]):
-    """Compare search results between original and quantized collections"""
+quantization_results = {}
+
+for method_name in quantization_configs.keys():
+        collection_name = f"quantized_{method_name}"
+        quantization_results[method_name] = benchmark(
+            collection_name, test_queries, method_name
+        )
+
+def measure_accuracy_retention(original, quantized, queries, factors):
 
     results = {}
 
     for factor in factors:
-        accuracy_scores = []
-        
-        for query in test_queries:
-            # Get baseline results
-            baseline_results = client.query_points(
-                collection_name=original_collection,
-                query=query,
+
+        scores = []
+
+        for q in queries:
+
+            baseline = client.query_points(
+                collection_name=original,
+                query=q,
                 limit=10
             )
-            baseline_ids = [point.id for point in baseline_results.points]
 
-            # Get quantized results with rescoring
-            quantized_results = client.query_points(
-                collection_name=quantized_collection,
-                query=query,
+            quantized_result = client.query_points(
+                collection_name=quantized,
+                query=q,
                 limit=10,
                 search_params=models.SearchParams(
                     quantization=models.QuantizationSearchParams(
                         rescore=True,
-                        oversampling=factor,
+                        oversampling=factor
                     )
-                ),
+                )
             )
-            quantized_ids = [point.id for point in quantized_results.points]
-            
-            # Calculate overlap (simple accuracy measure)
-            overlap = len(set(baseline_ids) & set(quantized_ids))
-            accuracy = overlap / len(baseline_ids)
-            accuracy_scores.append(accuracy)
-        
-        results[factor] = {
-            "avg_accuracy": np.mean(accuracy_scores)
-        }
-    
+
+            base_ids = {p.id for p in baseline.points}
+            quant_ids = {p.id for p in quantized_result.points}
+
+            overlap = len(base_ids & quant_ids)
+
+            scores.append(overlap / 10)
+
+        results[factor] = np.mean(scores)
+
     return results
 
 
-def tune_oversampling(collection_name, test_queries, factors=[2, 3, 5, 8, 10]):
-    """Find optimal oversampling factor"""
+def tune_oversampling(collection, queries, factors):
+
     results = {}
-    
+
     for factor in factors:
+
         latencies = []
-        
-        for query in test_queries:
-            start_time = time.time()
-            
-            response = client.query_points(
-                collection_name=collection_name,
-                query=query,
+
+        for q in queries:
+
+            start = time.time()
+
+            client.query_points(
+                collection_name=collection,
+                query=q,
                 limit=10,
                 search_params=models.SearchParams(
                     quantization=models.QuantizationSearchParams(
                         rescore=True,
-                        oversampling=factor,
+                        oversampling=factor
                     )
-                ),
+                )
             )
-            
-            latencies.append((time.time() - start_time) * 1000)
-        
+
+            latencies.append((time.time() - start) * 1000)
+
         results[factor] = {
-            "avg_latency": np.mean(latencies),
-            "p95_latency": np.percentile(latencies, 95)
+            "avg": np.mean(latencies),
+            "p95": np.percentile(latencies, 95)
         }
-    
+
     return results
 
-# Tune oversampling for your method of choice
-best_method = "binary"  # Choose based on your results
-oversampling_factors = [2, 3, 5, 8, 10]
 
-oversampling_results_latency = tune_oversampling(
-    f"quantized_{best_method}", 
-    your_test_queries,
-    oversampling_factors
+
+best_method = "binary"
+
+factors = [2, 3, 5, 8, 10]
+
+lat_results = tune_oversampling(
+    f"quantized_{best_method}",
+    test_queries,
+    factors
 )
 
-oversampling_results_accuracy = measure_accuracy_retention(
-    "your_domain_collection",
-    f"quantized_{best_method}", 
-    your_test_queries,
-    oversampling_factors
+acc_results = measure_accuracy_retention(
+    "store",
+    f"quantized_{best_method}",
+    test_queries,
+    factors
 )
 
 
-print("Oversampling Factor Optimization:")
-for factor in oversampling_factors:
-    print(f"  {factor}x:")
-    print(f"  {oversampling_results_latency[factor]['avg_latency']:.2f}ms avg latency, {oversampling_results_latency[factor]['p95_latency']:.2f}ms P95 latency")
-    print(f"  {oversampling_results_accuracy[factor]['avg_accuracy']:.2f} avg accuracy retention")
+print("\n===== QUANTIZATION PERFORMANCE ANALYSIS =====")
 
-print("=" * 60)
-print("QUANTIZATION PERFORMANCE ANALYSIS")
-print("=" * 60)
+print("\nBaseline:")
+print(f"Avg: {baseline_metrics['avg']:.2f}ms")
+print(f"P95: {baseline_metrics['p95']:.2f}ms")
 
-print(f"\nBaseline Performance:")
-print(f"  Average latency: {baseline_metrics['avg']:.2f}ms")
-print(f"  P95 latency: {baseline_metrics['p95']:.2f}ms")
+for method, result in quantization_results.items():
 
-print(f"\nQuantization Results:")
-for method, results in quantization_results.items():
-    no_rescoring = results['no_rescoring']
-    with_rescoring = results['with_rescoring']
-    
-    speedup_no_rescoring = baseline_metrics['avg'] / no_rescoring['avg']
-    speedup_with_rescoring = baseline_metrics['avg'] / with_rescoring['avg']
-    
-    print(f"\n{method.upper()}:")
-    print(f"  Without rescoring: {no_rescoring['avg']:.2f}ms ({speedup_no_rescoring:.1f}x speedup)")
-    print(f"  With rescoring: {with_rescoring['avg']:.2f}ms ({speedup_with_rescoring:.1f}x speedup)")
+    no = result["no_rescoring"]
+    res = result["with_rescoring"]
+
+    speed_no = baseline_metrics["avg"] / no["avg"]
+    speed_res = baseline_metrics["avg"] / res["avg"]
+
+    print(f"\n{method.upper()}")
+
+    print(f"Without Rescore: {no['avg']:.2f}ms ({speed_no:.2f}x speedup)")
+    print(f"With Rescore: {res['avg']:.2f}ms ({speed_res:.2f}x speedup)")
+
+print("\nOversampling Optimization")
+
+for f in factors:
+
+    print(
+        f"{f}x -> "
+        f"Latency {lat_results[f]['avg']:.2f}ms | "
+        f"Accuracy {acc_results[f]:.2f}"
+    )
