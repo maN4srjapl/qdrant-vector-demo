@@ -34,3 +34,30 @@ client.create_collection(
     }
 )
 
+'''
+. Without HNSW, queries use brute-force MaxSim scoring across all points, which provides maximum precision but may be slower on large collections
+MaxSim means for each query token, we find the document token with the highest similarity, and then aggregate those max similarities across all query tokens to get the final score for the document.
+'''
+
+'''
+But with multivectors:
+
+each document already has many vectors
+
+HNSW memory cost becomes large
+
+So this disables HNSW to save RAM.
+
+'''
+
+# Encode the query
+colbert = LateInteractionTextEmbedding("colbert-ir/colbertv2.0")
+colbert_query = next(colbert.query_embed(["what is the policy?"])).tolist()
+
+# Search using ColBERT multivector
+hits = client.query_points(
+    collection_name="my_colbert_collection",
+    query=colbert_query,
+    using="colbert",
+    limit=20,
+)
