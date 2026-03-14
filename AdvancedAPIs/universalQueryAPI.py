@@ -66,10 +66,14 @@ client.upsert(
 
 query_text = "what is the policy?"
 
-# Fast retrieval + precise reranking in one call
+# Encode the query
 dense_query_vector = next(dense_model.query_embed([query_text])).tolist()
 colbert_query_multivector = next(colbert_model.query_embed([query_text])).tolist()
 
+# Execute query using Reciprocal Rank Fusion (RRF)
+# This combines the rankings from two parallel searches: 
+# 1. A dense vector search using BGE
+# 2. A multivector search using ColBERT (here simplified to parallel retrieval)
 response = client.query_points(
     collection_name="articles",
     prefetch=[
@@ -77,15 +81,21 @@ response = client.query_points(
             query=dense_query_vector,
             using="bge-dense",
             limit=100
+        ),
+        models.Prefetch(
+            query=colbert_query_multivector,
+            using="colbert",
+            limit=100
         )
     ],
-    query=colbert_query_multivector,
-    using="colbert",
+    query=models.FusionQuery(
+        fusion=models.Fusion.RRF
+    ),
     limit=10
 )
 
 # Print the results
-print(f"Query: {query_text}\n")
+print(f"Query: {query_text} (Using RRF Fusion)\n")
 for i, point in enumerate(response.points):
     print(f"Rank {i+1}: Score: {point.score:.4f} | Text: {point.payload['text']}")
 
