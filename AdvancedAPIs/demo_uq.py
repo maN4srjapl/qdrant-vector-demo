@@ -127,3 +127,65 @@ client.upload_points(
     points=points,
 )
 
+research_query = "transformer architectures for multimodal learning"
+
+research_query_dense = next(dense_model.query_embed(research_query))
+research_query_sparse = next(sparse_model.query_embed(research_query)).as_object()
+research_query_colbert = next(colbert_model.query_embed(research_query))
+
+
+global_filter = models.Filter(
+    must=[
+        models.FieldCondition(
+            key="research_area",
+            match=models.MatchAny(any=[
+                "machine_learning",
+                "computer_vision",
+                "nlp",
+            ]),
+        ),
+        models.FieldCondition(
+            key="open_access",
+            match=models.MatchValue(value=True)
+        ),
+        models.FieldCondition(
+            key="published_date",
+            range=models.DatetimeRange(
+                gte=(datetime.now() - timedelta(days=365 * 6)).isoformat()
+            ),
+        ),
+        models.FieldCondition(key="impact_score", range=models.Range(gte=0.6)),
+        models.FieldCondition(key="citation_count", range=models.Range(gte=5)),
+    ]
+)
+
+hybrid_query = [
+    models.Prefetch(query=research_query_dense, using="dense", limit=100),
+    models.Prefetch(query=research_query_sparse, using="sparse", limit=100),
+]
+
+fusion_query = models.Prefetch(
+    prefetch=hybrid_query,
+    query=models.FusionQuery(fusion=models.Fusion.RRF),
+    limit=100,
+)
+
+response = client.query_points(
+    collection_name=collection_name,
+    prefetch=fusion_query,
+    query=research_query_colbert,
+    using="colbert",
+    query_filter=global_filter, 
+    limit=10,
+    with_payload=True,
+)
+
+print("Top Research Papers:")
+for i, hit in enumerate(response.points or [], 1):
+    paper = hit.payload
+    print(f"{i}. {paper['title']}")
+    print(f"   Authors: {', '.join(paper['authors'][:3])}{'...' if len(paper['authors']) > 3 else ''}")
+    print(f"   Published: {paper['published_date']} | Citations: {paper['citation_count']}")
+    print(f"   Research Area: {paper['research_area']}")
+    print(f"   Open Access: {paper['open_access']}")
+    print(f"   Score: {hit.score:.4f}\n")
